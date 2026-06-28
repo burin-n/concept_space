@@ -52,7 +52,7 @@ def run_test_suite(processor, model, layer_id, cache_dir, log_dir):
     Linear_phone_clean, Linear_spk_clean = get_Linear_model(
         X=train_data, y1=train_phone_data, y2=train_spk_data,
         y1_name="phone", y2_name="spk",
-        save_path="save_linear_model_layer4/train-clean",
+        save_path=None,
         norm=True)
 
     RANDOM_phone_clean = [get_random_model(in_dim=768, out_dim=39) for _ in range(5)]

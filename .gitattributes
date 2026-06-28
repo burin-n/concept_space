@@ -1,1 +1,2 @@
 *.ali filter=lfs diff=lfs merge=lfs -text
+save_space/**/*.pk filter=lfs diff=lfs merge=lfs -text
