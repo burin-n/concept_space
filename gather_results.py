@@ -19,6 +19,7 @@ gather
 score
     Compute retention / purity / leakage / interference from a score directory
     whose subdirectories follow the pattern {MODEL}_{LABEL}_{MODE}/.
+    Writes raw_score-v2_{mode}.csv files.
 
     Usage:
       python gather_results.py score score_dir [--train-data dev-clean]
@@ -245,7 +246,7 @@ def gather_concept_scores(
         modes = disc_modes
 
     records = []
-    label_pairs = list(zip(label_names, reversed(label_names)))
+    label_pairs = [tuple(label_names), tuple(reversed(label_names))]
 
     for mode in modes:
         mode_test = "clean" if mode == "all" else mode
@@ -254,8 +255,6 @@ def gather_concept_scores(
             for lab1, lab2 in label_pairs:
                 for seed in seeds:
                     d = _subdir(base_output, model, lab1, mode)
-
-                    # skip silently if any required file is absent
                     paths = [
                         _score_path(d, "projection", lab1, train_data),
                         _score_path(d, "rejection",  lab1, train_data),
@@ -278,9 +277,9 @@ def gather_concept_scores(
                         "mode": mode,
                         "seed": seed,
                         "retention": retention,
-                        "purity": purity,
+                        "purity": 1 - purity,
                         "leakage": leakage,
-                        "interference": interference,
+                        "interference": 1 - interference,
                     })
 
     return pd.DataFrame(records).drop_duplicates()
@@ -312,26 +311,20 @@ def add_best_worst_rows(df: pd.DataFrame) -> pd.DataFrame:
             current = eye_by_concept[concept]
             paired = eye_by_concept[other]
 
-            for method, values in [
-                (
-                    "BEST",
-                    {
-                        "retention": current["retention"],
-                        "purity": 1 - paired["leakage"],
-                        "leakage": current["leakage"],
-                        "interference": 1 - paired["retention"],
-                    },
-                ),
-                (
-                    "WORST",
-                    {
-                        "retention": current["leakage"],
-                        "purity": 1 - paired["retention"],
-                        "leakage": current["retention"],
-                        "interference": 1 - paired["leakage"],
-                    },
-                ),
-            ]:
+            for method, values in {
+                "BEST": {
+                    "retention": current["retention"],
+                    "purity": 1 - paired["leakage"],
+                    "leakage": current["leakage"],
+                    "interference": 1 - paired["retention"],
+                },
+                "WORST": {
+                    "retention": current["leakage"],
+                    "purity": 1 - paired["retention"],
+                    "leakage": current["retention"],
+                    "interference": 1 - paired["leakage"],
+                },
+            }.items():
                 existing = group[(group["method"] == method) & (group["concept"] == concept)]
                 if not existing.empty:
                     continue
@@ -351,18 +344,6 @@ def add_best_worst_rows(df: pd.DataFrame) -> pd.DataFrame:
 
     synthetic = pd.DataFrame(synthetic_records, columns=df.columns)
     return pd.concat([df, synthetic], ignore_index=True)
-
-
-def normalize_score_rows(df: pd.DataFrame) -> pd.DataFrame:
-    """Convert raw cross-concept scores to the final report convention."""
-    if df.empty:
-        return df
-
-    result = df.copy()
-    for col in ["purity", "interference"]:
-        if col in result.columns:
-            result[col] = 1 - result[col]
-    return result
 
 
 def _score_sort_key(values: pd.Series) -> pd.Series:
@@ -445,7 +426,6 @@ def _cmd_score(args):
     else:
         df = gather_concept_scores(base_output=args.base_output, **shared)
 
-    df = normalize_score_rows(df)
     df = add_best_worst_rows(df)
     df = sort_score_rows(df)
     print(df.to_string())
@@ -489,7 +469,7 @@ if __name__ == "__main__":
     p_score.add_argument("--layers", nargs="+", type=int, default=None,
                          help="Layer IDs to include when base_output contains layer_*/ subdirs (default: all found)")
     p_score.add_argument("--save-dir", default=None,
-                         help="Directory to write raw_score_{mode}.csv (default: base_output)")
+                         help="Directory to write raw_score-v2_{mode}.csv (default: base_output)")
 
     args = parser.parse_args()
     if args.command == "gather":

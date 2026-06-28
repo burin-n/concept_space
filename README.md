@@ -4,7 +4,7 @@ This repository hosts scripts for the paper [A framework for analyzing concept r
 
 The code estimates and evaluates concept spaces for the frame-level phone and speaker concepts, using HuBERT representations on Librispeech dev and test clean sets.
 
-Supported concept estimators: LEACE, COV, Linear Classifier, CPCA, LDA, Random, and Identity (ambient space).
+Supported concept estimators: LEACE, COV, MLR, CPCA, LDA, Random, and Identity (ambient space).
 
 ## Installation
 
@@ -14,12 +14,7 @@ pip install -e .
 
 ## Setup
 
-Copy `.env` and fill in the required paths:
-
-```bash
-cp .env .env.local  # or edit .env directly
-```
-
+(Optional) Update .env
 ```dotenv
 # Directory containing forced-alignment .ali files
 # Expected files: dev-clean.ali, test-clean.ali
@@ -41,9 +36,9 @@ The scripts load `.env` automatically at startup via `python-dotenv`.
 
 ## Running
 
-### Per-layer evaluation
+### Per-layer evaluation (Section 5.1)
 
-Trains all estimators on `dev-clean` features and evaluates phone/speaker linear probing across layers on `test-clean`:
+Trains all estimators on `dev-clean` features and evaluates phone/speaker probes across layers on `test-clean`:
 
 ```bash
 python run_acl_test_suite.py <log_dir> [--layers 0 1 ... 12]
@@ -52,7 +47,7 @@ python run_acl_test_suite.py <log_dir> [--layers 0 1 ... 12]
 Outputs one directory per layer: `<log_dir>/layer_{N}/`.
 This per-layer evaluation reads and writes feature caches under `CACHE_DIR` by default.
 
-### Train-clean-460 LEACE evaluation
+### Train-clean-460 LEACE evaluation (Section 5.2)
 
 Train standard LEACE spaces on `train-clean-100` plus `train-clean-360`, then evaluate on `test-clean`:
 
@@ -66,13 +61,13 @@ This saves LEACE spaces under `save_space/<model_name>/<layer>/` and writes scor
 
 ### Summarizing results
 
-Compute the main retention, purity, leakage, and interference summary scores:
+Compute the retention, purity, leakage, and interference summary scores:
 
 ```bash
 python gather_results.py score <log_dir> [--layers 11]  [--save-dir <score_dir>]
 ```
 
-This writes csv files containing paper-style scores to `<score_dir>`.
+This writes `raw_score-v2_{mode}.csv` files containing paper-style scores to `<score_dir>`.
 
 
 Use `gather` to get raw accuracy scores for each classifiers and estimators in one table:
@@ -107,7 +102,7 @@ LibriSpeech is downloaded automatically from the HuggingFace Hub (`openslr/libri
 | --- | ---: |
 | `dev-clean` | 40 GB |
 | `test-clean` | 40 GB |
-| `train-clean-100` | 700 GB |
-| `train-clean-360` | 2.5 TB (Expected) |
+| `train-clean-100` | 700 GB (Optional)|
+| `train-clean-360` | 2.5 TB (Optional, Expected) |
 
 Forced-alignment files (`.ali`) must be provided separately and pointed to via `ALIGNMENT_DIR`. The pre-computed speaker test splits in `save_spk_test_split/` are included in the repo.
