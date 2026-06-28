@@ -80,7 +80,7 @@ For both commands, `<log_dir>` should match the argument passed to `run_acl_test
 
 ### Plotting figures
 
-Scripts for plotting figures can be foud in `plot_scripts/`.
+Scripts for plotting figures can be found in `plot_scripts/`.
 
 ## Output structure
 
@@ -107,6 +107,6 @@ LibriSpeech is downloaded automatically from the HuggingFace Hub (`openslr/libri
 | `dev-clean` | 40 GB |
 | `test-clean` | 40 GB |
 | `train-clean-100` | 700 GB (Optional)|
-| `train-clean-360` | 2.5 TB (Optional, Expected) |
+| `train-clean-360` | 2.5 TB (Optional) |
 
 Forced-alignment files (`.ali`) must be provided separately and pointed to via `ALIGNMENT_DIR`. The pre-computed speaker test splits in `save_spk_test_split/` are included in the repo.
