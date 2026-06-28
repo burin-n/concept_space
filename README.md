@@ -78,6 +78,10 @@ python gather_results.py gather <log_dir> [--layers 11] [--save-dir <score_dir>]
 
 For both commands, `<log_dir>` should match the argument passed to `run_acl_test_suite.py`.
 
+### Plotting figures
+
+Scripts for plotting figures can be foud in `plot_scripts/`.
+
 ## Output structure
 
 Per-layer evaluation:

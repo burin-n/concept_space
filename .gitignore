@@ -1,2 +1,4 @@
 output*/
 *.pyc
+plot_scripts/plots/
+plot_scripts/.ipynb_checkpoints/
