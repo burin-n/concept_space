@@ -4,10 +4,11 @@ Collect evaluation scores into tables.
 Subcommands
 -----------
 gather
-    Aggregate per-layer CSV scores produced by run_acl_test_suite.py.
+    Aggregate CSV scores produced by run scripts.
 
     Output directory structure written by eval_v3_wrapper:
       {log_dir}/layer_{N}/{proj_name}/{mode}/{proj_train_data}{suffix}.csv
+      {log_dir}/{proj_name}/{mode}/{proj_train_data}{suffix}.csv
         mode   : rejection | projection
         suffix : -phone    | -spk
 
@@ -103,30 +104,39 @@ def _default_score_save_dir(base_output: str, layer_dirs: list[tuple[int, str]])
 # gather subcommand
 # ---------------------------------------------------------------------------
 
+def _read_score_csvs(score_dir: str, layer_id: int | None = None) -> list[pd.DataFrame]:
+    frames = []
+    csv_files = glob.glob(os.path.join(score_dir, "*", "*", "*.csv"))
+    for csv_path in csv_files:
+        parts = Path(csv_path).parts
+        mode = parts[-2]
+        stem = Path(csv_path).stem  # e.g. "dev-clean-phone" or "dev-clean-spk"
+
+        if stem.endswith("-spk"):
+            target = "spk"
+        elif stem.endswith("-phone"):
+            target = "phone"
+        else:
+            target = stem
+
+        df = pd.read_csv(csv_path)
+        if layer_id is not None:
+            df["layer"] = layer_id
+        df["mode"] = mode
+        df["target"] = target
+        frames.append(df)
+    return frames
+
+
 def gather(log_dir: str, layers: list[int] | None = None) -> pd.DataFrame:
-    layer_dirs = _resolve_layer_dirs(log_dir, layers=layers, required=True)
+    layer_dirs = _resolve_layer_dirs(log_dir, layers=layers, required=False)
 
     frames = []
-    for layer_id, layer_dir in layer_dirs:
-        csv_files = glob.glob(os.path.join(layer_dir, "*", "*", "*.csv"))
-        for csv_path in csv_files:
-            parts = Path(csv_path).parts
-            proj_name = parts[-3]
-            mode = parts[-2]
-            stem = Path(csv_path).stem  # e.g. "dev-clean-phone" or "dev-clean-spk"
-
-            if stem.endswith("-spk"):
-                target = "spk"
-            elif stem.endswith("-phone"):
-                target = "phone"
-            else:
-                target = stem
-
-            df = pd.read_csv(csv_path)
-            df["layer"] = layer_id
-            df["mode"] = mode
-            df["target"] = target
-            frames.append(df)
+    if layer_dirs:
+        for layer_id, layer_dir in layer_dirs:
+            frames.extend(_read_score_csvs(layer_dir, layer_id=layer_id))
+    elif layers is None:
+        frames.extend(_read_score_csvs(log_dir))
 
     if not frames:
         raise ValueError("No CSV files found under the given prefix/layers")
@@ -135,7 +145,8 @@ def gather(log_dir: str, layers: list[int] | None = None) -> pd.DataFrame:
     meta_cols = ["layer", "proj name", "mode", "target", "proj_train_data", "clf_train_data"]
     data_cols = [c for c in result.columns if c not in meta_cols]
     result = result[[c for c in meta_cols if c in result.columns] + data_cols]
-    result = result.sort_values(["layer", "proj name", "mode", "target"]).reset_index(drop=True)
+    sort_cols = [c for c in ["layer", "proj name", "mode", "target"] if c in result.columns]
+    result = result.sort_values(sort_cols).reset_index(drop=True)
     return result
 
 
@@ -145,6 +156,17 @@ def gather(log_dir: str, layers: list[int] | None = None) -> pd.DataFrame:
 
 _KNOWN_MODES = {"clean", "other", "all"}
 _KNOWN_LABELS = {"spk", "phone"}
+_METHOD_SORT_ORDER = {
+    "WORST": 0,
+    "BEST": 1,
+    "EYE": 2,
+    "RANDOM": 3,
+    "LC": 4,
+    "LDA": 5,
+    "PCA": 6,
+    "COV": 7,
+    "LEACE": 8,
+}
 
 
 def _discover(base_output: str):
@@ -264,6 +286,119 @@ def gather_concept_scores(
     return pd.DataFrame(records).drop_duplicates()
 
 
+def add_best_worst_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Append notebook-style BEST/WORST rows derived from EYE rows."""
+    required_cols = {"concept", "method", "mode", "seed", "retention", "purity", "leakage", "interference"}
+    if df.empty or not required_cols.issubset(df.columns):
+        return df
+
+    group_cols = ["mode", "seed"]
+    if "layer" in df.columns:
+        group_cols.insert(0, "layer")
+
+    synthetic_records = []
+    for _, group in df.groupby(group_cols, dropna=False, sort=False):
+        eye = group[group["method"] == "EYE"]
+        concepts = list(dict.fromkeys(eye["concept"].tolist()))
+        if len(concepts) != 2:
+            continue
+
+        eye_by_concept = {row["concept"]: row for _, row in eye.iterrows()}
+        if set(eye_by_concept) != set(concepts):
+            continue
+
+        for concept in concepts:
+            other = concepts[1] if concept == concepts[0] else concepts[0]
+            current = eye_by_concept[concept]
+            paired = eye_by_concept[other]
+
+            for method, values in [
+                (
+                    "BEST",
+                    {
+                        "retention": current["retention"],
+                        "purity": 1 - paired["leakage"],
+                        "leakage": current["leakage"],
+                        "interference": 1 - paired["retention"],
+                    },
+                ),
+                (
+                    "WORST",
+                    {
+                        "retention": current["leakage"],
+                        "purity": 1 - paired["retention"],
+                        "leakage": current["retention"],
+                        "interference": 1 - paired["leakage"],
+                    },
+                ),
+            ]:
+                existing = group[(group["method"] == method) & (group["concept"] == concept)]
+                if not existing.empty:
+                    continue
+
+                record = {col: pd.NA for col in df.columns}
+                for col in group_cols:
+                    record[col] = current[col]
+                record.update({
+                    "concept": concept,
+                    "method": method,
+                    **values,
+                })
+                synthetic_records.append(record)
+
+    if not synthetic_records:
+        return df
+
+    synthetic = pd.DataFrame(synthetic_records, columns=df.columns)
+    return pd.concat([df, synthetic], ignore_index=True)
+
+
+def normalize_score_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Convert raw cross-concept scores to the final report convention."""
+    if df.empty:
+        return df
+
+    result = df.copy()
+    for col in ["purity", "interference"]:
+        if col in result.columns:
+            result[col] = 1 - result[col]
+    return result
+
+
+def _score_sort_key(values: pd.Series) -> pd.Series:
+    if values.name != "method":
+        return values
+
+    def method_key(value):
+        method = str(value)
+        if method in _METHOD_SORT_ORDER:
+            return (_METHOD_SORT_ORDER[method], 0, method)
+
+        random_match = re.fullmatch(r"RANDOM(\d+)", method)
+        if random_match:
+            return (_METHOD_SORT_ORDER["RANDOM"], int(random_match.group(1)), method)
+
+        leace_comp_match = re.fullmatch(r"LEACE-comp(\d+|None)", method)
+        if leace_comp_match:
+            component = leace_comp_match.group(1)
+            component_order = 10_000 if component == "None" else int(component)
+            return (_METHOD_SORT_ORDER["LEACE"] + 1, component_order, method)
+
+        return (1_000, 0, method)
+
+    return values.map(method_key)
+
+
+def sort_score_rows(df: pd.DataFrame) -> pd.DataFrame:
+    if "layer" in df.columns:
+        sort_cols = [col for col in ["layer", "concept", "method", "mode", "seed"] if col in df.columns]
+    else:
+        sort_cols = [col for col in ["concept", "method", "mode", "seed"] if col in df.columns]
+    if df.empty or not sort_cols:
+        return df
+    return df.sort_values(sort_cols, key=_score_sort_key, kind="stable").reset_index(drop=True)
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -310,6 +445,9 @@ def _cmd_score(args):
     else:
         df = gather_concept_scores(base_output=args.base_output, **shared)
 
+    df = normalize_score_rows(df)
+    df = add_best_worst_rows(df)
+    df = sort_score_rows(df)
     print(df.to_string())
 
     if df.empty:
@@ -318,7 +456,7 @@ def _cmd_score(args):
     save_dir = args.save_dir or _default_score_save_dir(args.base_output, layer_dirs)
     os.makedirs(save_dir, exist_ok=True)
     for mode in df["mode"].unique():
-        out_path = os.path.join(save_dir, f"raw_score_{mode}.csv")
+        out_path = os.path.join(save_dir, f"raw_score-v2_{mode}.csv")
         df[df["mode"] == mode].to_csv(out_path, index=False)
         print(f"Saved {out_path}")
 

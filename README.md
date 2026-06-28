@@ -50,7 +50,19 @@ python run_acl_test_suite.py <log_dir> [--layers 0 1 ... 12]
 ```
 
 Outputs one directory per layer: `<log_dir>/layer_{N}/`.
+This per-layer evaluation reads and writes feature caches under `CACHE_DIR` by default.
 
+### Train-clean-460 LEACE evaluation
+
+Train standard LEACE spaces on `train-clean-100` plus `train-clean-360`, then evaluate on `test-clean`:
+
+```bash
+python run_leace_train_clean460.py <score_dir> [--layer 11] [--cache-train]
+```
+
+By default, train-clean-100/360 features are computed on-the-fly without using caches. Use `--cache-train` to store cache.
+
+This saves LEACE spaces under `save_space/<model_name>/<layer>/` and writes score CSVs under `<score_dir>/`. The script will automatically load LEACE space weights if found.
 
 ### Summarizing results
 
@@ -89,6 +101,13 @@ Each CSV has columns: `proj name`, `proj_train_data`, `clf_train_data`, `clf_tra
 
 ## Data
 
-LibriSpeech is downloaded automatically from the HuggingFace Hub (`openslr/librispeech_asr`). Extracted features are cached under `CACHE_DIR` (default: `cache/`), configured via `.env`.
+LibriSpeech is downloaded automatically from the HuggingFace Hub (`openslr/librispeech_asr`). Extracted features are cached under `CACHE_DIR` (default: `cache/`), configured via `.env`. Plan for roughly the following cache sizes:
+
+| Split | Expected cache size |
+| --- | ---: |
+| `dev-clean` | 40 GB |
+| `test-clean` | 40 GB |
+| `train-clean-100` | 700 GB |
+| `train-clean-360` | 2.5 TB (Expected) |
 
 Forced-alignment files (`.ali`) must be provided separately and pointed to via `ALIGNMENT_DIR`. The pre-computed speaker test splits in `save_spk_test_split/` are included in the repo.
